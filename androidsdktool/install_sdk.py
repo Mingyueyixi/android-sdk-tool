@@ -292,12 +292,17 @@ class AndroidSDKInstaller:
         # cmd的值，不需要用双引号括起来，否则变量会被自动展开
         return ";".join(result)
 
-    def _query_win_env_value(self, name):
+    def _query_win_env_value(self, name, is_sys=False):
         """
         使用cmd命令查询特定环境变量的值
         """
         # 执行windows命令，从注册表获取用户path原始值
-        cmd = rf'reg query "HKCU\Environment" /v {name}'
+        if is_sys:
+            # 获取系统级别环境变量
+            cmd = rf'reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v {name}'
+        else:
+            # 获取用户环境变量
+            cmd = rf'reg query "HKCU\Environment" /v {name}'
         print(cmd)
         result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, check=False)
         if not result.returncode == 0:
@@ -326,24 +331,34 @@ class AndroidSDKInstaller:
             pre_list = add_list
         new_value = ";".join(set(pre_list))
         new_value = f'"{new_value}"'
-        cmd = rf'powershell.exe reg add "HKCU\Environment" /v Path /t {reg_value_type} /d {new_value} /f'
+        cmd = rf'powershell.exe reg add "HKCU\Environment" /v {name} /t {reg_value_type} /d {new_value} /f'
         print(cmd)
         os.system(cmd)
 
-    def _append_env_value_by_cmd(self, name, add_list: list, value_type="REG_EXPAND_SZ"):
+    def _append_env_value_by_cmd(self, name, add_list: list, value_type="REG_EXPAND_SZ", is_sys=True, existing_env_data=None):
         """
-        使用powershell为特定环境变量追加值，如path环境变量追加
+        使用cmd为特定环境变量追加值，如path环境变量追加
+        
+        Args:
+            name: 环境变量名
+            add_list: 要添加的值列表
+            value_type: 注册表值类型
+            is_sys: 是否为系统环境变量
+            existing_env_data: 已经查询到的环境变量数据 (env_value, reg_value_type, item_list)，避免重复查询
         """
-        env_value, reg_value_type, item_list = self._query_win_env_value(name)
-        if not reg_value_type:
+        if existing_env_data:
+            env_value, reg_value_type, item_list = existing_env_data
+        else:
+            env_value, reg_value_type, item_list = self._query_win_env_value(name, is_sys=is_sys)
+            
+        if not reg_value_type:            
             reg_value_type = value_type if value_type else "REG_EXPAND_SZ"
-
+        
         pre_item_list = []    
         # cmd中，%%是变量引用，会被自动转成实际值，需要使用^来保留原始值
         for item in item_list + add_list if item_list else add_list:
-            # 把所有%全部替换成^%
-            # %前方不能有^，避免出现^^%
-            item = re.sub(r"(?<!^)%", r"^%", item)
+            # 把所有%全部替换成^%, 注意%前方不能有^，避免出现^^%
+            item = re.sub(r"(?<!\^)%", r"^%", item)
             # cmd 中，带空格的路径还需要用双引号括起来，否则会被截断
             # 考虑路径中存在%%以及多个空格的情况，同时cmd这里不支持单引号，所以将空格部分都双引号括起来
             iter = re.finditer(r'(?<!")\s+(?!")', item)
@@ -364,7 +379,11 @@ class AndroidSDKInstaller:
                 item = "".join(text)        
             pre_item_list.append(item)
         new_value = ";".join(set(pre_item_list))
-        cmd = rf'reg add "HKCU\Environment" /v Path /t {reg_value_type} /d {new_value} /f'
+        if is_sys:
+            # 系统级别环境变量，需要管理员权限
+            cmd = rf'reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v {name} /t {reg_value_type} /d {new_value} /f'            
+        else:
+            cmd = rf'reg add "HKCU\Environment" /v {name} /t {reg_value_type} /d {new_value} /f'
         print(cmd)
         os.system(cmd)
 
@@ -372,11 +391,29 @@ class AndroidSDKInstaller:
         """
         把ANDROID_HOME设置为Windows系统下的路径
         """
-        self._append_env_value_by_cmd(env_var_name, [android_home])
+        env_value, reg_value_type, item_list = self._query_win_env_value(env_var_name, is_sys=False)
+        if not env_value:
+            # 用户注册表中没有该环境变量，查看系统级别的
+            env_value, reg_value_type, item_list = self._query_win_env_value(env_var_name, is_sys=True)
+            if not env_value:
+                # 系统级别注册表中没有该环境变量，则创建
+                self._append_env_value_by_cmd(env_var_name, [android_home], is_sys=False)                                                                 
+
         # windows 的path路径添加
         add_list = [fr"%{env_var_name}%\tools", fr"%{env_var_name}%\platform-tools", fr"%{env_var_name}%\cmdline-tools\lasted"]
-        # 执行windows命令，在注册表更新path值
-        self._append_env_value_by_cmd("Path", add_list)
+        
+        path_value, reg_path_type, path_item_list = self._query_win_env_value("Path", is_sys=False)
+        sys_path_value, reg_path_type, sys_path_item_list = self._query_win_env_value("Path", is_sys=True)
+        merged_path_items = set(path_item_list + sys_path_item_list)
+        
+        # 过滤掉已经存在的路径
+        filtered_add_list = [item for item in add_list if item not in merged_path_items]
+        
+        # 传入已查询到的Path环境变量数据，避免重复查询
+        if filtered_add_list:
+            self._append_env_value_by_cmd("Path", filtered_add_list, 
+                                        existing_env_data=(path_value, reg_path_type, path_item_list), 
+                                        is_sys=False)
 
     def _set_android_home_unix(self, android_home: Path,  env_var_name="ANDROID_HOME"):
         """

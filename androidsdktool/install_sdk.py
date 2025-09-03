@@ -374,7 +374,7 @@ class AndroidSDKInstaller:
         """
         self._append_env_value_by_cmd(env_var_name, [android_home])
         # windows 的path路径添加
-        add_list = [fr"%{env_var_name}%\tools", fr"%{env_var_name}%\platform-tools"]
+        add_list = [fr"%{env_var_name}%\tools", fr"%{env_var_name}%\platform-tools", fr"%{env_var_name}%\cmdline-tools\lasted"]
         # 执行windows命令，在注册表更新path值
         self._append_env_value_by_cmd("Path", add_list)
 
@@ -418,13 +418,24 @@ class AndroidSDKInstaller:
 
         # 构建要添加的内容
         android_home_line = f"export {env_var_name}={android_home}\n"
-        path_line = f"export PATH=$PATH:{android_home}/tools:{android_home}/platform-tools\n"
+        path_line = f"export PATH=$PATH:${env_var_name}/tools:${env_var_name}/platform-tools:${env_var_name}/cmdline-tools/lasted\n"
         
         # 添加ANDROID_HOME和PATH设置（如果不存在）
         new_content = content
         if not android_home_exists:
-            # 在文件开头添加ANDROID_HOME设置
-            new_content = f"# Android SDK\n{android_home_line}" + new_content
+            # 在文件使用ANDROID_HOME之前添加ANDROID_HOME设置
+            lines = new_content.splitlines()
+            add_to_lines = False
+            for line in range(len(lines)):  
+                text = lines[line]              
+                if f"${env_var_name}" in text:
+                    lines.insert(line, android_home_line.strip())
+                    add_to_lines = True
+                    break
+            if add_to_lines:
+                new_content = "\n".join(lines)            
+            else:
+                new_content = new_content + "\n" + android_home_line
         else:
             # 更新现有的ANDROID_HOME值
             new_content = android_home_pattern.sub(f"export {env_var_name}={android_home}", new_content)
@@ -462,6 +473,11 @@ class AndroidSDKInstaller:
             text.append(f"{path} {url} {checksum_type}:{checksum}")
         print("\n".join(text))
 
+    def _is_cmd_tools_exit(self, sdk_dir:str):
+        cmdline_tools_dir = self._get_cmdline_tools_lasted_dir(Path(sdk_dir))
+        # 目录非空
+        return cmdline_tools_dir.exists() and cmdline_tools_dir.is_dir() and any(cmdline_tools_dir.iterdir())
+    
     def run(self):
         # 当前系统名称
         os_name = platform.system()
@@ -476,50 +492,53 @@ class AndroidSDKInstaller:
             return
         self._print_all_versions(all_archives, os_name)
 
-        android_sdk_dir = self._get_default_sdk_path()
+        android_sdk_dir_default = self._get_default_sdk_path()
         lasted_archive = self._get_latest_cmdline_tools_version(all_archives)
         url = urljoin(google_repository_url, lasted_archive["archives"][os_name]["url"])
         checksum = lasted_archive["archives"][os_name]["checksum"]
         checksum_type = lasted_archive["archives"][os_name]["checksum-type"]
 
-        # 下载 cmdline-tools
-        cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
-
         sys_android_home = os.environ.get("ANDROID_HOME")
         sys_android_sdk_root = os.environ.get("ANDROID_SDK_ROOT")
-        sdk_env_var_name = "ANDROID_HOME" if sys_android_sdk_root else "ANDROID_SDK_ROOT"
+        sdk_env_var_name = "ANDROID_SDK_ROOT" if sys_android_sdk_root else "ANDROID_HOME"
 
         if not sys_android_home:
             sys_android_home = sys_android_sdk_root
 
-        if sys_android_home:
-            cmdline_tools_dir = self._get_cmdline_tools_lasted_dir(Path(sys_android_home))
-            # 目录非空
-            if cmdline_tools_dir.exists() and cmdline_tools_dir.is_dir() and any(cmdline_tools_dir.iterdir()):
-                choice_prompt = f"""cmdline-tools directory is not empty at {sys_android_home}
+        if sys_android_home and self._is_cmd_tools_exit(sys_android_home):            
+            choice_prompt = f"""cmdline-tools directory is not empty at {sys_android_home}
 Please choose an option:
-1. Install to {android_sdk_dir} and update {sdk_env_var_name} and Path environment variables
-2. Update {sys_android_home}
+1. Install default to {android_sdk_dir_default} , set {sdk_env_var_name} and Path environment variables
+2. Update to {sdk_env_var_name}={sys_android_home}
 3. Exit
 """
-                print(choice_prompt)
-                choice = input("Enter your choice (1/2/3): ").strip()
-                
-                if choice == "1":
-                    # 继续安装到android_sdk_dir
-                    pass
-                elif choice == "2":
-                    # 更新到sys_android_home
-                    android_sdk_dir = sys_android_home
-                else:
-                    # 退出程序
-                    print("Exiting...")
-                    return
-        # 解压
-        self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir))     
-        # 设置环境变量
-        self._set_android_home_env(android_sdk_dir, env_var_name=sdk_env_var_name)
-        print(f"Android SDK installed to {android_sdk_dir}")
+            print(choice_prompt)
+            choice = input("Enter your choice (1/2/3): ").strip()            
+            if choice == "1":
+                # 下载 cmdline-tools
+                cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+                # 继续安装到默认android_sdk_dir
+                self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
+                # 设置环境变量
+                self._set_android_home_env(android_sdk_dir_default, env_var_name=sdk_env_var_name)
+                pass
+            elif choice == "2":
+                # 下载 cmdline-tools
+                cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+                # 更新到sys_android_home
+                self._install_cmd_line_tools(cmdline_archive_file, Path(sys_android_home))
+            else:
+                # 退出程序
+                print("Exiting...")
+                return
+        else:
+            # 下载 cmdline-tools
+            cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+            # 解压
+            self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
+            # 设置环境变量
+            self._set_android_home_env(android_sdk_dir_default, env_var_name=sdk_env_var_name)
+            print(f"Android SDK installed to {android_sdk_dir_default}")
 
 
 def main():

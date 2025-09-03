@@ -1,0 +1,35 @@
+# https://packaging.python.org/en/latest/specifications/pyproject-toml/
+# https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#writing-pyproject-toml
+
+[project]
+name = "android-sdk-tool"
+version = "0.1.0"
+description = "Some tools for android sdk"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+  {name = "Mingyueyixi", email = "mingyueyixi@hotmail.com"},
+]
+dependencies = [
+    "lxml>=6.0.1",
+    "requests>=2.32.4",
+]
+
+[[tool.uv.index]]
+# 可选的索引名称。
+name = "aliyun"
+# 索引的必需 URL。
+url = "https://mirrors.aliyun.com/pypi/simple"
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[project.urls]
+Homepage = "https://github.com/Mingyueyixi/android-sdk-tool"
+Repository = "https://github.com/Mingyueyixi/android-sdk-tool.git"
+Issues = "https://github.com/Mingyueyixi/android-sdk-tool/issues"

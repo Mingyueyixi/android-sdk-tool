@@ -515,6 +515,127 @@ class AndroidSDKInstaller:
         # 目录非空
         return cmdline_tools_dir.exists() and cmdline_tools_dir.is_dir() and any(cmdline_tools_dir.iterdir())
     
+    def _get_latest_build_tools_version(self, android_home):
+        """
+        通过sdkmanager获取最新的build-tools版本
+        """
+        sdkmanager_path = Path(android_home) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        if platform.system() == "Windows":
+            sdkmanager_path = sdkmanager_path.with_suffix(".bat")
+        
+        if not sdkmanager_path.exists():
+            # 尝试其他可能的路径
+            sdkmanager_path = Path(android_home) / "tools" / "bin" / "sdkmanager"
+            if platform.system() == "Windows":
+                sdkmanager_path = sdkmanager_path.with_suffix(".bat")
+            
+            if not sdkmanager_path.exists():
+                print("未找到 sdkmanager 工具")
+                return None
+        
+        try:
+            # 获取可用的包列表
+            cmd = [str(sdkmanager_path), "--list"]
+            print("正在获取可用的build-tools版本列表...")
+            result = subprocess.run(
+                cmd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=android_home
+            )
+            
+            if result.returncode != 0:
+                print(f"获取包列表失败: {result.stderr}")
+                return None
+            
+            # 解析输出，查找build-tools相关行
+            lines = result.stdout.split('\n')
+            build_tools_versions = []
+            
+            for line in lines:
+                if line.startswith("build-tools;"):
+                    # 提取版本号
+                    version = line.split(";")[1].split()[0]  # 获取分号后第一个字段并去除空格
+                    build_tools_versions.append(version)
+            
+            if not build_tools_versions:
+                print("未找到任何build-tools版本")
+                return None
+            
+            # 按版本号排序，返回最新版本
+            def version_key(version_str):
+                # 分割版本号为主版本号、次版本号和修订号
+                parts = version_str.split(".")
+                try:
+                    return [int(part) for part in parts]
+                except ValueError:
+                    # 如果无法转换为整数，返回默认值
+                    return [0, 0, 0]
+            
+            latest_version = max(build_tools_versions, key=version_key)
+            print(f"找到最新build-tools版本: {latest_version}")
+            return latest_version
+            
+        except Exception as e:
+            print(f"获取build-tools版本时出现异常: {e}")
+            return None
+    
+    def _install_build_tools(self, android_home, build_tools_version=None):
+        """
+        使用sdkmanager安装指定版本的build-tools，如果没有指定版本则安装最新版本
+        """
+        # 如果没有指定版本，则获取最新版本
+        if not build_tools_version:
+            build_tools_version = self._get_latest_build_tools_version(android_home)
+            if not build_tools_version:
+                print("无法获取最新build-tools版本")
+                return False
+        
+        # 检查指定版本是否已经安装
+        build_tools_dir = Path(android_home) / "build-tools" / build_tools_version
+        if build_tools_dir.exists() and any(build_tools_dir.iterdir()):
+            print(f"build-tools 版本 {build_tools_version} 已经存在，无需安装")
+            return True
+        
+        print(f"正在安装 build-tools 版本 {build_tools_version}...")
+        
+        sdkmanager_path = Path(android_home) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        if platform.system() == "Windows":
+            sdkmanager_path = sdkmanager_path.with_suffix(".bat")
+        
+        if not sdkmanager_path.exists():
+            # 尝试其他可能的路径
+            sdkmanager_path = Path(android_home) / "tools" / "bin" / "sdkmanager"
+            if platform.system() == "Windows":
+                sdkmanager_path = sdkmanager_path.with_suffix(".bat")
+            
+            if not sdkmanager_path.exists():
+                print("未找到 sdkmanager 工具，无法自动安装 build-tools")
+                return False
+        
+        try:
+            cmd = [str(sdkmanager_path), f"build-tools;{build_tools_version}"]
+            print(f"执行命令: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                text=True,
+                input="y\n",  # 自动确认许可
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=android_home
+            )
+            
+            if result.returncode == 0:
+                print(f"build-tools 版本 {build_tools_version} 安装成功")
+                return True
+            else:
+                print(f"安装失败: {result.stderr}")
+                return False
+        except Exception as e:
+            print(f"安装过程中出现异常: {e}")
+            return False
+
     def run(self):
         # 当前系统名称
         os_name = platform.system()
@@ -558,12 +679,16 @@ Please choose an option:
                 self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
                 # 设置环境变量
                 self._set_android_home_env(android_sdk_dir_default, env_var_name=sdk_env_var_name)
+                # 安装默认版本的build-tools
+                self._install_build_tools(android_sdk_dir_default)
                 pass
             elif choice == "2":
                 # 下载 cmdline-tools
                 cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
                 # 更新到sys_android_home
                 self._install_cmd_line_tools(cmdline_archive_file, Path(sys_android_home))
+                # 安装默认版本的build-tools
+                self._install_build_tools(sys_android_home)
             else:
                 # 退出程序
                 print("Exiting...")
@@ -575,6 +700,8 @@ Please choose an option:
             self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
             # 设置环境变量
             self._set_android_home_env(android_sdk_dir_default, env_var_name=sdk_env_var_name)
+            # 安装默认版本的build-tools
+            self._install_build_tools(android_sdk_dir_default)
             print(f"Android SDK installed to {android_sdk_dir_default}")
 
 

@@ -209,53 +209,58 @@ class AndroidSDKInstaller:
             return file_checksum == checksum
 
     def _download_cmdline_tools(self, url, checksum, checksum_type):
-        res = http_client.request("GET", url, stream=True, timeout=(10, 10))
-        res.raise_for_status()
-        # 获取用户下载目录
-        download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-        # 解析链接，获取最后的/部分，不要query参数
-        url_info = parse.urlparse(url)
-        filename = os.path.basename(url_info.path)
-        download_file = Path(download_dir, filename)
-
-        if os.path.exists(download_file):
-            # 校验文件
-            if checksum and self._check_file_checksum(download_file, checksum, checksum_type):
-                print(f"File {filename} already exists, and checksum matches")
-                return download_file
-            else:
-                print(
-                    f"File {filename} already exists, but checksum does not match, downloading again..."
-                )
-
-        f = open(download_file, "wb+")
         try:
-            content_length = int(res.headers.get("Content-Length", 0))
-            if not content_length:
-                content_length = res.raw.tell()
-            download_length = 0
-            while True:
-                chunk = res.raw.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                content_length += len(chunk)
-                progress = int(100 * download_length / content_length)
-                print(f"Downloading {filename}...{progress}", end="")
-            f.flush()
-        finally:
-            res.close()
-            f.close()
-        print(f"Downloaded {filename}, start checking checksum...")
-        if not self._check_file_checksum(download_file, checksum, checksum_type):
-            print(
-                f"Downloaded failed, Checksum failed for {filename} , expected checksum: {checksum}, please redownload it."
-            )
-            return
-        print(f"Downloaded successfully")
-        return download_file
+            with http_client.get(url, stream=True, timeout=(10, 10)) as res:
+                res.raise_for_status()
+
+                # 获取用户下载目录
+                download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                os.makedirs(download_dir, exist_ok=True)
+
+                # 解析链接，获取最后的/部分，不要query参数
+                url_info = parse.urlparse(url)
+                filename = os.path.basename(url_info.path)
+                download_file = Path(download_dir, filename)
+
+                if download_file.exists():
+                    if checksum and self._check_file_checksum(download_file, checksum, checksum_type):
+                        print(f"File {filename} already exists, and checksum matches")
+                        return download_file
+                    else:
+                        print(
+                            f"File {filename} already exists, but checksum does not match, downloading again..."
+                        )
+
+                content_length = int(res.headers.get("Content-Length") or 0)
+                downloaded = 0
+                with open(download_file, "wb") as f:
+                    for chunk in res.iter_content(1024 * 1024):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if content_length:
+                            progress = int(100 * downloaded / content_length)
+                            print(f"\rDownloading {filename}...{progress}%", end="", flush=True)
+                        else:
+                            print(f"\rDownloading {filename}...{downloaded} bytes", end="", flush=True)
+                print()
+
+            print(f"Downloaded {filename}, start checking checksum...")
+            if checksum and not self._check_file_checksum(download_file, checksum, checksum_type):
+                print(
+                    f"Downloaded failed, Checksum failed for {filename} , expected checksum: {checksum}, please redownload it."
+                )
+                try:
+                    download_file.unlink()
+                except Exception:
+                    pass
+                return None
+            print(f"Downloaded successfully")
+            return download_file
+        except Exception as e:
+            print(f"Download failed: {e}")
+            return None
 
     def _get_cmdline_tools_lasted_dir(self, sdk_dir: Path):
         return sdk_dir / "cmdline-tools/latest"
@@ -387,17 +392,32 @@ class AndroidSDKInstaller:
         print(cmd)
         os.system(cmd)
 
+    def _set_win_env_value(self, name, value, value_type="REG_EXPAND_SZ", is_sys=False):
+        """
+        直接设置 Windows 环境变量值，替换已有值。
+        """
+        key = (
+            "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"
+            if is_sys
+            else "HKCU\\Environment"
+        )
+        value = str(value)
+        cmd = rf'reg add "{key}" /v {name} /t {value_type} /d "{value}" /f'
+        print(cmd)
+        os.system(cmd)
+
     def _set_android_home_windows(self, android_home: Path,  env_var_name="ANDROID_HOME"):
         """
         把ANDROID_HOME设置为Windows系统下的路径
         """
+        android_home_str = str(android_home)
         env_value, reg_value_type, item_list = self._query_win_env_value(env_var_name, is_sys=False)
-        if not env_value:
-            # 用户注册表中没有该环境变量，查看系统级别的
-            env_value, reg_value_type, item_list = self._query_win_env_value(env_var_name, is_sys=True)
-            if not env_value:
-                # 系统级别注册表中没有该环境变量，则创建
-                self._append_env_value_by_cmd(env_var_name, [android_home], is_sys=False)                                                                 
+        if env_value:
+            current_value = env_value.strip('"')
+            if os.path.normcase(os.path.normpath(current_value)) != os.path.normcase(os.path.normpath(android_home_str)):
+                self._set_win_env_value(env_var_name, android_home_str, is_sys=False)
+        else:
+            self._set_win_env_value(env_var_name, android_home_str, is_sys=False)
 
         # windows 的path路径添加
         add_list = [fr"%{env_var_name}%\tools", fr"%{env_var_name}%\platform-tools", fr"%{env_var_name}%\cmdline-tools\lasted"]
@@ -515,23 +535,34 @@ class AndroidSDKInstaller:
         # 目录非空
         return cmdline_tools_dir.exists() and cmdline_tools_dir.is_dir() and any(cmdline_tools_dir.iterdir())
     
-    def _get_latest_build_tools_version(self, android_home):
+    def _get_sdkmanager_path(self, android_home):
         """
-        通过sdkmanager获取最新的build-tools版本
+        返回 sdkmanager 的绝对路径。
         """
         sdkmanager_path = Path(android_home) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
         if platform.system() == "Windows":
             sdkmanager_path = sdkmanager_path.with_suffix(".bat")
-        
-        if not sdkmanager_path.exists():
-            # 尝试其他可能的路径
-            sdkmanager_path = Path(android_home) / "tools" / "bin" / "sdkmanager"
-            if platform.system() == "Windows":
-                sdkmanager_path = sdkmanager_path.with_suffix(".bat")
-            
-            if not sdkmanager_path.exists():
-                print("未找到 sdkmanager 工具")
-                return None
+
+        if sdkmanager_path.exists():
+            return sdkmanager_path
+
+        sdkmanager_path = Path(android_home) / "tools" / "bin" / "sdkmanager"
+        if platform.system() == "Windows":
+            sdkmanager_path = sdkmanager_path.with_suffix(".bat")
+
+        if sdkmanager_path.exists():
+            return sdkmanager_path
+
+        return None
+
+    def _get_latest_build_tools_version(self, android_home):
+        """
+        通过sdkmanager获取最新的build-tools版本
+        """
+        sdkmanager_path = self._get_sdkmanager_path(android_home)
+        if not sdkmanager_path:
+            print("未找到 sdkmanager 工具")
+            return None
         
         try:
             # 获取可用的包列表
@@ -549,15 +580,18 @@ class AndroidSDKInstaller:
                 print(f"获取包列表失败: {result.stderr}")
                 return None
             
-            # 解析输出，查找build-tools相关行
+            # 解析输出，查找 build-tools 相关行
             lines = result.stdout.split('\n')
             build_tools_versions = []
             
             for line in lines:
-                if line.startswith("build-tools;"):
+                stripped = line.strip()
+                if stripped.startswith("build-tools;") or "build-tools;" in stripped:
                     # 提取版本号
-                    version = line.split(";")[1].split()[0]  # 获取分号后第一个字段并去除空格
-                    build_tools_versions.append(version)
+                    parts = stripped.split("build-tools;")
+                    if len(parts) > 1:
+                        version = parts[1].split()[0]
+                        build_tools_versions.append(version)
             
             if not build_tools_versions:
                 print("未找到任何build-tools版本")
@@ -600,19 +634,10 @@ class AndroidSDKInstaller:
         
         print(f"正在安装 build-tools 版本 {build_tools_version}...")
         
-        sdkmanager_path = Path(android_home) / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
-        if platform.system() == "Windows":
-            sdkmanager_path = sdkmanager_path.with_suffix(".bat")
-        
-        if not sdkmanager_path.exists():
-            # 尝试其他可能的路径
-            sdkmanager_path = Path(android_home) / "tools" / "bin" / "sdkmanager"
-            if platform.system() == "Windows":
-                sdkmanager_path = sdkmanager_path.with_suffix(".bat")
-            
-            if not sdkmanager_path.exists():
-                print("未找到 sdkmanager 工具，无法自动安装 build-tools")
-                return False
+        sdkmanager_path = self._get_sdkmanager_path(android_home)
+        if not sdkmanager_path:
+            print("未找到 sdkmanager 工具，无法自动安装 build-tools")
+            return False
         
         try:
             cmd = [str(sdkmanager_path), f"build-tools;{build_tools_version}"]
@@ -675,16 +700,21 @@ Please choose an option:
             if choice == "1":
                 # 下载 cmdline-tools
                 cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+                if not cmdline_archive_file:
+                    print("cmdline-tools download failed; aborting.")
+                    return
                 # 继续安装到默认android_sdk_dir
                 self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
                 # 设置环境变量
                 self._set_android_home_env(android_sdk_dir_default, env_var_name=sdk_env_var_name)
                 # 安装默认版本的build-tools
                 self._install_build_tools(android_sdk_dir_default)
-                pass
             elif choice == "2":
                 # 下载 cmdline-tools
                 cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+                if not cmdline_archive_file:
+                    print("cmdline-tools download failed; aborting.")
+                    return
                 # 更新到sys_android_home
                 self._install_cmd_line_tools(cmdline_archive_file, Path(sys_android_home))
                 # 安装默认版本的build-tools
@@ -696,6 +726,9 @@ Please choose an option:
         else:
             # 下载 cmdline-tools
             cmdline_archive_file = self._download_cmdline_tools(url, checksum, checksum_type)
+            if not cmdline_archive_file:
+                print("cmdline-tools download failed; aborting.")
+                return
             # 解压
             self._install_cmd_line_tools(cmdline_archive_file, Path(android_sdk_dir_default))
             # 设置环境变量

@@ -2,12 +2,8 @@
 
 tools for android sdk
 
-```shell
-pip install android-sdk-tool
-```
-
 ## install android sdk 
 
 ```shell
-python -m androidsdktool.install
+uv run androidsdktool.install_sdk.py
 ```

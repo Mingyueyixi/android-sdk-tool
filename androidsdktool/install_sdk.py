@@ -527,12 +527,28 @@ class AndroidSDKInstaller:
 
     def _set_android_home_env(self, android_sdk_dir: Path, env_var_name="ANDROID_HOME"):
         """
-        把ANDROID_HOME写入到系统配置中
+        把ANDROID_HOME写入到系统配置中，并同步更新当前进程的 os.environ
         """
         if platform.system() == "Windows":
             self._set_android_home_windows(android_sdk_dir, env_var_name)
         else:
             self._set_android_home_unix(android_sdk_dir, env_var_name)
+
+        # 同步更新当前进程的环境变量，以便脚本后续操作能直接使用
+        android_sdk_dir_str = str(android_sdk_dir)
+        os.environ["ANDROID_HOME"] = android_sdk_dir_str
+        os.environ["ANDROID_SDK_ROOT"] = android_sdk_dir_str
+        bin_paths = [
+            str(Path(android_sdk_dir) / "cmdline-tools" / "latest" / "bin"),
+            str(Path(android_sdk_dir) / "platform-tools"),
+            str(Path(android_sdk_dir) / "tools" / "bin"),
+        ]
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        existing_path = os.environ.get("PATH", "")
+        for bp in bin_paths:
+            if bp not in existing_path.split(path_sep):
+                existing_path = bp + path_sep + existing_path
+        os.environ["PATH"] = existing_path
 
     def _print_all_versions(self, all_archives: list, os_name: str):
         text = []

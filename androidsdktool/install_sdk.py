@@ -20,8 +20,18 @@ http_client = requests.Session()
 
 class AndroidSDKInstaller:
     def __init__(self):
-        pass
-
+        pass   
+    def is_cmdline_tools_installed(self, sdk_dir):
+        """
+        检查 cmdline-tools 是否已经安装
+        """
+        if not sdk_dir:
+            return False
+        return self.get_sdk_manager_bin_path(sdk_dir).exists()
+    
+    def get_sdk_manager_bin_path(self, sdk_dir):
+        return self._get_cmdline_tools_lasted_dir(Path(sdk_dir)) / "bin" / ("sdkmanager.bat" if platform.system() == "Windows" else "sdkmanager")
+    
     def _get_namespace(self, element):
         """
         提取XML命名空间
@@ -264,7 +274,7 @@ class AndroidSDKInstaller:
 
     def _get_cmdline_tools_lasted_dir(self, sdk_dir: Path):
         return sdk_dir / "cmdline-tools/latest"
-
+        
     def _install_cmd_line_tools(self, zip_path: Path, sdk_dir: Path):
         cmdline_tools_lasted_dir = self._get_cmdline_tools_lasted_dir(sdk_dir)
         if cmdline_tools_lasted_dir.exists():

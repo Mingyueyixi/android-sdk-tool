@@ -623,44 +623,121 @@ class AndroidSDKInstaller:
             print(f"获取build-tools版本时出现异常: {e}")
             return None
     
+    def _get_latest_platforms_version(self, android_home):
+        """
+        通过sdkmanager获取最新的platforms版本（只取纯数字版本号，如 android-36）
+        """
+        sdkmanager_path = self._get_sdkmanager_path(android_home)
+        if not sdkmanager_path:
+            print("未找到 sdkmanager 工具")
+            return None
+
+        try:
+            cmd = [str(sdkmanager_path), "--list"]
+            print("正在获取可用的platforms版本列表...")
+            result = subprocess.run(
+                cmd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=android_home
+            )
+
+            if result.returncode != 0:
+                print(f"获取包列表失败: {result.stderr}")
+                return None
+
+            lines = result.stdout.split('\n')
+            platforms_versions = []
+
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("platforms;android-"):
+                    # 提取 android- 后面的版本号
+                    parts = stripped.split("platforms;android-")
+                    if len(parts) > 1:
+                        version = parts[1].split()[0]
+                        # 只保留纯数字版本号（过滤 Baklava/CANARY/CinnamonBun/ext 等非数字版本）
+                        if re.match(r'^\d+(\.\d+)*$', version):
+                            platforms_versions.append(version)
+
+            if not platforms_versions:
+                print("未找到任何platforms版本")
+                return None
+
+            def version_key(version_str):
+                parts = version_str.split(".")
+                try:
+                    return [int(part) for part in parts]
+                except ValueError:
+                    return [0]
+
+            latest_version = max(platforms_versions, key=version_key)
+            print(f"找到最新platforms版本: android-{latest_version}")
+            return latest_version
+
+        except Exception as e:
+            print(f"获取platforms版本时出现异常: {e}")
+            return None
+
     def _install_build_tools(self, android_home, build_tools_version=None):
         """
         使用sdkmanager安装指定版本的build-tools，如果没有指定版本则安装最新版本
         """
-        # 如果没有指定版本，则获取最新版本
         if not build_tools_version:
             build_tools_version = self._get_latest_build_tools_version(android_home)
             if not build_tools_version:
                 print("无法获取最新build-tools版本")
                 return False
-        
-        # 检查指定版本是否已经安装
-        build_tools_dir = Path(android_home) / "build-tools" / build_tools_version
-        if build_tools_dir.exists() and any(build_tools_dir.iterdir()):
-            print(f"build-tools 版本 {build_tools_version} 已经存在，无需安装")
-            return True
-        
+
         print(f"正在安装 build-tools 版本 {build_tools_version}...")
-        
+
+        return self._run_sdkmanager_install(android_home, f"build-tools;{build_tools_version}")
+
+    def _install_platform_tools(self, android_home):
+        """
+        使用sdkmanager安装platform-tools
+        """
+        print("正在安装 platform-tools...")
+        return self._run_sdkmanager_install(android_home, "platform-tools")
+
+    def _install_platforms(self, android_home, platforms_version=None):
+        """
+        使用sdkmanager安装指定版本的platforms，如果没有指定版本则安装最新版本
+        """
+        if not platforms_version:
+            platforms_version = self._get_latest_platforms_version(android_home)
+            if not platforms_version:
+                print("无法获取最新platforms版本")
+                return False
+
+        print(f"正在安装 platforms 版本 android-{platforms_version}...")
+
+        return self._run_sdkmanager_install(android_home, f"platforms;android-{platforms_version}")
+
+    def _run_sdkmanager_install(self, android_home, package):
+        """
+        执行sdkmanager安装命令
+        """
         sdkmanager_path = self._get_sdkmanager_path(android_home)
         if not sdkmanager_path:
-            print("未找到 sdkmanager 工具，无法自动安装 build-tools")
+            print("未找到 sdkmanager 工具")
             return False
-        
+
         try:
-            cmd = [str(sdkmanager_path), f"build-tools;{build_tools_version}"]
+            cmd = [str(sdkmanager_path), package]
             print(f"执行命令: {' '.join(cmd)}")
             result = subprocess.run(
                 cmd,
                 text=True,
-                input="y\n",  # 自动确认许可
+                input="y\n",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=android_home
             )
-            
+
             if result.returncode == 0:
-                print(f"build-tools 版本 {build_tools_version} 安装成功")
+                print(f"{package} 安装成功")
                 return True
             else:
                 print(f"安装失败: {result.stderr}")
@@ -668,6 +745,16 @@ class AndroidSDKInstaller:
         except Exception as e:
             print(f"安装过程中出现异常: {e}")
             return False
+
+    def _install_ext_options(self, android_home):
+        """
+        安装扩展选项：build-tools、platform-tools、platforms
+        """
+        print("开始安装扩展选项...")
+        self._install_build_tools(android_home)
+        self._install_platform_tools(android_home)
+        self._install_platforms(android_home)
+        print("扩展选项安装完成")
 
     def run(self):
         # 当前系统名称
@@ -760,7 +847,7 @@ class AndroidSDKInstaller:
 
         # 安装扩展选项
         if action == "install_cmdline_ext":
-            self._install_build_tools(target_sdk_path)
+            self._install_ext_options(target_sdk_path)
 
         print(f"Android SDK installed to {target_sdk_path}")
 

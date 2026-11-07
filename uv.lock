@@ -12,6 +12,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "lxml" },
+    { name = "once-utils" },
     { name = "requests", version = "2.32.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.9'" },
     { name = "requests", version = "2.32.5", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.9'" },
 ]
@@ -19,6 +20,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "lxml", specifier = ">=6.0.1" },
+    { name = "once-utils", specifier = ">=0.1.0" },
     { name = "requests", specifier = ">=2.32.4" },
 ]
 
@@ -248,6 +250,12 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/6b/d4/c2b46e432377c45d611ae2f669aa47971df1586c1a5240675801d0f02bac/lxml-6.0.1-pp311-pypy311_pp73-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e352d8578e83822d70bea88f3d08b9912528e4c338f04ab707207ab12f4b7aac" },
     { url = "https://mirrors.aliyun.com/pypi/packages/b6/db/8f620f1ac62cf32554821b00b768dd5957ac8e3fd051593532be5b40b438/lxml-6.0.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:51bd5d1a9796ca253db6045ab45ca882c09c071deafffc22e06975b7ace36300" },
 ]
+
+[[package]]
+name = "once-utils"
+version = "0.1.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/2f/b1/ea6bb5e72798eb66baf8233f1f3d255743b5d98ffd76e7630ca68f993c49/once_utils-0.1.0.tar.gz", hash = "sha256:d24322ee13bcc99ea4a311b125c5867c8e88e1a2cc9dfe8714ba07759accbd2d" }
 
 [[package]]
 name = "requests"

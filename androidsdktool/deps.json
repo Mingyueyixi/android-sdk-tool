@@ -1,0 +1,48 @@
+{
+    "jdks": {
+        "windows": [
+            {
+                "arch": "x64",
+                "major": 17,
+                "url": "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/windows/OpenJDK17U-jdk_x64_windows_hotspot_17.0.19_10.zip"
+            }
+        ],
+        "linux": [
+            {
+                "arch": "x64",
+                "major": 17,
+                "url": "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/linux/OpenJDK17U-jdk_x64_linux_hotspot_17.0.19_10.tar.gz"
+            }
+        ],
+        "mac": [
+            {
+                "arch": "x64",
+                "major": 17,
+                "url": "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/mac/OpenJDK17U-jdk_x64_mac_hotspot_17.0.19_10.tar.gz"
+            }
+        ]
+    },
+    "cmdline-tools": {
+        "windows": [
+            {
+                "major": 20,
+                "url": "https://dl.google.com/android/repository/commandlinetools-win-14742923_latest.zip",
+                "sha1": "16b3f45ddb3d85ea6bbe6a1c0b47146daf0db450"
+            }
+        ],
+        "linux": [
+            {
+                "major": 20,
+                "url": "https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip",
+                "sha1": "48833c34b761c10cb20bcd16582129395d121b27"
+            }
+        ],
+        "mac": [
+            {
+                "major": 20,
+                "url": "https://dl.google.com/android/repository/commandlinetools-mac-14742923_latest.zip",
+                "sha1": "cc27cca4b84bfdbc7df17e3d0a01d0c640d8ee71"
+            }
+        ]
+    }
+}

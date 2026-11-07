@@ -12,6 +12,7 @@ authors = [
 ]
 dependencies = [
     "lxml>=6.0.1",
+    "once-utils>=0.1.0",
     "requests>=2.32.4",
 ]
 

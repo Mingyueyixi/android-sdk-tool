@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import platform
 import onceutils
-from .install_sdk import AndroidSDKInstaller
+from .android_sdk_installer import AndroidSDKInstaller
 
 
 def run_cmd(
@@ -386,19 +386,22 @@ def main():
     if not os.path.isfile(apk_signer_path):
         print(f"未在指定build-tools版本下找到apksigner工具: {apk_signer_path}")
         print("尝试自动安装build-tools...")
-        installer = AndroidSDKInstaller()
-        if installer._install_build_tools(android_home, app_config.build_tools_version):
-            # 重新设置apk_signer_path
-            if platform.system() == "Windows":
-                apk_signer_path = apk_signer_dir / "apksigner.bat"
-            else:
-                apk_signer_path = apk_signer_dir / "apksigner"
-            
-            # 再次检查是否安装成功
-            if not os.path.isfile(apk_signer_path):
-                print(f"安装后仍未找到apksigner工具: {apk_signer_path}")
-                return
+        installer = AndroidSDKInstaller(sdk_home=android_home)
+        try:
+            installer.install_cmdline_tools()
+            installer.install_packages([f"build-tools;{app_config.build_tools_version}"])
+        except Exception as e:
+            print(f"build-tools 安装失败: {e}")
+            return
+        # 重新设置apk_signer_path
+        if platform.system() == "Windows":
+            apk_signer_path = apk_signer_dir / "apksigner.bat"
         else:
+            apk_signer_path = apk_signer_dir / "apksigner"
+
+        # 再次检查是否安装成功
+        if not os.path.isfile(apk_signer_path):
+            print(f"安装后仍未找到apksigner工具: {apk_signer_path}")
             return
 
     app_config.save()

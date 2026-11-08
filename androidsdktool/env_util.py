@@ -62,45 +62,42 @@ export {self.name}={env_value}
 {self.tag_end}""".strip()
 
     def apply_env_value(self, value: list|str, is_merge=False):
+        # 先统一计算最终值，再按 bashrc 现状选择写入位置，
+        # 保证任何分支（首次写入/追加/替换）的合并语义一致
         if type(value) is list:
-            env_value = ":".join(dict.fromkeys(value))
+            new_value_list = list(dict.fromkeys(value))
         else:
-            env_value = value
+            new_value_list = [value]
+
+        if is_merge:
+            old_value = self.get_decoration_env_value()
+            old_value_list = old_value.split(":") if old_value else []
+            for v in old_value_list:
+                if v == f"${self.name}":
+                    # 自身引用统一移到末尾
+                    continue
+                if v in new_value_list:
+                    # 移除重复的值，避免重复添加
+                    continue
+                new_value_list.append(v)
+            if type(value) is list or f"${self.name}" in old_value_list:
+                # PATH 类变量：末尾必须保留自身引用（如 $PATH），
+                # 否则 export 会覆盖已有 PATH，导致其他命令全部失效
+                new_value_list.append(f"${self.name}")
+            env_value = ":".join(new_value_list)
+        else:
+            env_value = value if type(value) is not list else ":".join(new_value_list)
+
         path_bashrc = Path(os.path.expanduser("~/.bashrc"))
         env_text = self.get_export_env_line(env_value)
         if path_bashrc.exists():
             text = path_bashrc.read_text(encoding="utf-8")
             if text.find(self.tag_start) != -1 and text.find(self.tag_end) != -1:
+                # 已有本变量的托管块：原地替换
                 start_idx, end_idx = self.index_tag_start_end(text)
-                text = text[:start_idx] + env_text + text[end_idx:]
-                if is_merge:
-                    old_value = self.get_decoration_env_value()
-                    if old_value:
-                        # 合并值，去重
-                        old_value_list = old_value.split(":")
-                        new_value_list = env_value.split(":")
-                        filter_value_list = []
-
-                        for v in old_value_list:
-                            if v == f"${self.name}":
-                                # 如果包含自身引用，移除掉，要加到后面去
-                                continue
-                            filter_value_list.append(v)
-                        for vf in filter_value_list:
-                            if vf in new_value_list:
-                                # 移除重复的值，避免重复添加
-                                new_value_list.remove(vf)                                
-                        # 合并新旧值，新值在前，旧值在后，这样新值才最先被找到，且添加自身引用，例如export PATH=/new/path:$PATH
-                        filter_value_list.append(f"${self.name}")
-                        merged_value_list = new_value_list + filter_value_list
-                        merged_value = ":".join(merged_value_list)
-                        env_text = self.get_export_env_line(merged_value)
-                        # print(f"start_idx: {start_idx}, end_idx: {end_idx}, env_text: {env_text}")
-                        text = f"{text[:start_idx] + env_text}\n{text[end_idx:]}"
-                else:
-                    text = "\n".join([text[:start_idx], env_text, text[end_idx:]])
+                text = "\n".join([text[:start_idx], env_text, text[end_idx:]])
             else:
-                # 不存在，直接追加
+                # 无托管块，直接追加
                 text += "\n" + env_text
         else:
             # 文件不存在，直接写入新内容

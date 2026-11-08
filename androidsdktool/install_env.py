@@ -11,6 +11,7 @@ import platform
 from pathlib import Path
 
 from .android_sdk_installer import AndroidSDKInstaller
+from .env_util import EnvUtil
 from .jdk_installer import JdkInstaller
 
 
@@ -95,21 +96,75 @@ def install_jdk(version: str = "17"):
     JdkInstaller().install(version)
 
 
+def _persist_environment(installer: AndroidSDKInstaller) -> None:
+    """把 JAVA_HOME / ANDROID_HOME 及相关目录持久化到当前用户配置（经 EnvUtil）"""
+    jdk_home = os.environ.get("JAVA_HOME", "")
+    android_home = os.environ.get("ANDROID_HOME", "")
+
+    if jdk_home:
+        EnvUtil.set_env_value("JAVA_HOME", jdk_home)
+    if android_home:
+        EnvUtil.set_env_value("ANDROID_HOME", android_home)
+        EnvUtil.set_env_value("ANDROID_SDK_ROOT", android_home)
+
+    # PATH 使用变量引用而非硬编码路径（Windows 为 %VAR%，Unix 为 $VAR），
+    # 注册表/rc 文件中不展开，SDK 移动位置后依然有效
+    is_windows = platform.system() == "Windows"
+    path_entries = []
+    if jdk_home:
+        path_entries.append(r"%JAVA_HOME%\bin" if is_windows else "$JAVA_HOME/bin")
+    if android_home:
+        path_entries += [
+            r"%ANDROID_HOME%\platform-tools" if is_windows else "$ANDROID_HOME/platform-tools",
+            r"%ANDROID_HOME%\cmdline-tools\latest\bin" if is_windows
+            else "$ANDROID_HOME/cmdline-tools/latest/bin",
+        ]
+    if path_entries:
+        EnvUtil.put_env_value("PATH", path_entries)
+
+
 class InstallEnvTask:
     """安装构建环境（Android SDK、JDK）"""
 
     def __init__(self, project_root: str | None = None):
         self._project_root = Path(project_root) if project_root else Path(os.getcwd())
 
-    def run(self):
+    def run(self, persist: bool = True):
+        """安装构建环境。
+
+        Args:
+            persist: 是否将环境变量持久化到当前用户配置（.bashrc / 注册表）。
+                默认持久化；设为 False 时环境变量仅在当前进程生效，适合
+                容器、CI 等环境隔离场景。
+        """
         install_jdk()
-        install_android_sdk(self._project_root)
+        installer = install_android_sdk(self._project_root)
         _fix_gradlew_permissions(self._project_root)
+        if persist:
+            _persist_environment(installer)
+        else:
+            print("已跳过环境变量持久化（仅当前进程生效）")
 
 
-def main():
-    """命令行入口：一键配置构建环境（JDK + Android SDK）"""
-    InstallEnvTask().run()
+def main(argv: list[str] | None = None):
+    """命令行入口：一键配置构建环境（JDK + Android SDK）
+
+    Args:
+        argv: 命令行参数，默认取 sys.argv[1:]
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="一键配置构建环境（JDK + Android SDK）"
+    )
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help="不将环境变量持久化到用户配置（.bashrc / 注册表），"
+             "仅当前进程生效，适合环境隔离场景",
+    )
+    args = parser.parse_args(argv)
+    InstallEnvTask().run(persist=not args.no_persist)
 
 
 if __name__ == "__main__":

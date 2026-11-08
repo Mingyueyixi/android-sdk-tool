@@ -22,6 +22,45 @@ class Downloader:
         self._default_dest_dir = Path(dest_dir) if dest_dir else Path.home() / "Downloads"
 
     @staticmethod
+    def probe_url(url: str, timeout: float = 5.0) -> bool:
+        """探测 URL 是否可访问。
+
+        先用 HEAD 请求（允许重定向）；若服务器拒绝 HEAD（403/405/501），
+        再用 Range GET（只取 1 字节）验证，避免误杀禁用 HEAD 的镜像。
+        """
+        try:
+            res = requests.head(
+                url, timeout=timeout, headers=Downloader._HEADERS, allow_redirects=True
+            )
+            if res.status_code < 400:
+                return True
+        except requests.RequestException:
+            pass
+        # HEAD 失败（被拒或网络错误）时，用小范围 GET 再验证一次
+        try:
+            headers = {**Downloader._HEADERS, "Range": "bytes=0-0"}
+            with requests.get(
+                url, stream=True, timeout=timeout, headers=headers, allow_redirects=True
+            ) as res:
+                return res.status_code < 400
+        except requests.RequestException:
+            return False
+
+    @staticmethod
+    def pick_available_url(urls: list[str], timeout: float = 5.0, label: str = "资源") -> str:
+        """按优先级探测候选镜像 URL，返回第一个可用的地址。
+
+        全部不可用时抛出 RuntimeError。
+        """
+        for url in urls:
+            print(f"检测{label}镜像源: {url} ...", end=" ", flush=True)
+            if Downloader.probe_url(url, timeout):
+                print("可用")
+                return url
+            print("不可用")
+        raise RuntimeError(f"所有{label}镜像源均不可用: {urls}")
+
+    @staticmethod
     def sha1_of(file_path: Path) -> str:
         """计算文件 sha1 值"""
         h = hashlib.sha1()

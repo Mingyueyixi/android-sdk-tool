@@ -95,20 +95,36 @@ class JdkInstaller:
         return self._deps_config
 
     def _get_download_url(self) -> str:
-        """从 deps.json 获取当前平台 JDK 下载 URL"""
+        """从 deps.json 获取当前平台 JDK 下载 URL。
+
+        deps.json 的 jdks.<os> 下每个条目代表一个 JDK 发行版（如 Oracle
+        OpenJDK、Eclipse Temurin），条目内的 urls 是该发行版同一构建文件
+        的多个镜像。按条目顺序逐个探测：某发行版存在可用镜像则直接采用，
+        其所有镜像均不可用时自动落到下一个发行版。
+        """
         config = self._load_config()
         os_key = self._get_os_key()
         entries = config.get("jdks", {}).get(os_key, [])
         if not entries:
             raise RuntimeError(f"deps.json 中未找到 jdks.{os_key} 配置")
-        # 优先匹配当前架构，否则取第一个
+
+        # 只保留与当前架构匹配的条目（未标注 arch 的条目视为通配）
         machine = platform.machine().lower()
         arch_map = {"amd64": "x64", "x86_64": "x64", "aarch64": "aarch64"}
         current_arch = arch_map.get(machine, machine)
-        for entry in entries:
-            if entry.get("arch") == current_arch:
-                return entry["url"]
-        return entries[0]["url"]
+        matched = [e for e in entries if e.get("arch") in (None, current_arch)]
+        if not matched:
+            raise RuntimeError(f"deps.json 中未找到 jdks.{os_key} 架构 {current_arch} 的配置")
+
+        errors = []
+        for entry in matched:
+            dist = entry.get("name", "JDK")
+            candidates = entry.get("urls") or [entry["url"]]
+            try:
+                return Downloader.pick_available_url(candidates, label=f"JDK[{dist}]")
+            except RuntimeError as e:
+                errors.append(str(e))
+        raise RuntimeError(f"所有 JDK 发行版镜像均不可用: {errors}")
 
     def _extract(self, archive_path: Path) -> Path:
         """解压 JDK 到 _jdks_home，返回解压后的 JDK 根目录（保留压缩包自带目录名）"""

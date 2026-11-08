@@ -84,7 +84,10 @@ class AndroidSDKInstaller:
         return self._deps_config
 
     def _get_cmdline_tools_info(self) -> tuple[str, Optional[str]]:
-        """从 deps.json 获取当前平台 cmdline-tools 的下载 URL 和 sha1
+        """从 deps.json 获取当前平台 cmdline-tools 的下载 URL 和 sha1。
+
+        deps.json 每个条目通过 urls 数组提供多个镜像候选（按优先级排列），
+        逐个探测后返回第一个可用的地址。
 
         Returns:
             (url, sha1) 元组
@@ -95,7 +98,9 @@ class AndroidSDKInstaller:
         if not entries:
             raise RuntimeError(f"deps.json 中未找到 cmdline-tools.{os_key} 配置")
         entry = entries[0]
-        return entry["url"], entry.get("sha1")
+        candidates = entry.get("urls") or [entry["url"]]
+        url = Downloader.pick_available_url(candidates, label="cmdline-tools")
+        return url, entry.get("sha1")
 
     @property
     def _cmdline_tools_dir(self) -> Path:
